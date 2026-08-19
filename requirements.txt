@@ -1,0 +1,6 @@
+Flask>=3.0,<4
+requests>=2.31,<3
+gunicorn>=22,<24
+EOFcat > start.sh <<'EOF'
+#!/bin/sh
+exec gunicorn agent:app --bind 0.0.0.0:${PORT:-8080} --workers 1 --timeout 120

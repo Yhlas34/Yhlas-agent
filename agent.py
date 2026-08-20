@@ -1,111 +1,175 @@
-cd ~/myagent
-
-cat > agent.py <<'PY'
+from flask import Flask, request, jsonify
 import os
 import requests
-from flask import Flask, request, jsonify
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 
-# =========================
-# ENV
-# =========================
-
-AI_API_KEY = os.getenv("AI_API_KEY", "")
-AI_API_URL = os.getenv(
-    "AI_API_URL",
+API_KEY = os.getenv("API_KEY")
+API_URL = os.getenv(
+    "API_URL",
     "https://openrouter.ai/api/v1/chat/completions"
 )
-AI_MODEL = os.getenv(
-    "AI_MODEL",
-    "deepseek/deepseek-chat"
+MODEL = os.getenv(
+    "MODEL",
+    "openai/gpt-4o-mini"
 )
 
-TG_TOKEN = os.getenv("TG_TOKEN", "")
+SYSTEM_PROMPT = """
+Sen eğitim amaçlı bir piyasa analiz asistanısın.
 
+Görevin:
+Kamuya açık trader eğitimlerinde kullanılan strateji prensiplerini
+birleştirerek piyasa verisini analiz etmektir.
 
-# =========================
-# AI
-# =========================
+Tek bir traderı birebir taklit etme.
+Strateji prensiplerini bağımsız şekilde değerlendir.
 
-def ask_ai(message):
-    if not AI_API_KEY:
-        return "AI_API_KEY Railway Variables bölümünde ayarlanmamış."
+Analizde mümkün olduğunca:
+- Market structure
+- Trend
+- Support / Resistance
+- Breakout
+- Retest
+- Liquidity
+- Price action
+- Volume
+- Volatility
+- Risk/Reward
+
+faktörlerini değerlendir.
+
+Her faktöre 0-100 arasında uygunluk puanı ver.
+
+Sonuç:
+BULLISH
+BEARISH
+veya
+WAIT
+
+şeklinde olsun.
+
+Skor 70'in altındaysa WAIT tercih et.
+
+Çıktı formatı:
+
+SYMBOL:
+TIMEFRAME:
+BIAS:
+CONFIDENCE:
+MARKET STRUCTURE:
+SUPPORT_RESISTANCE:
+PRICE_ACTION:
+VOLUME:
+LIQUIDITY:
+REASON:
+
+Bu sistem eğitim ve simülasyon amaçlıdır.
+Kesin kazanç veya garanti verme.
+Gerçek para ile işlem açma.
+"""
+
+def analyze(symbol, timeframe, market_data, strategy_notes=""):
+
+    prompt = f"""
+Sembol: {symbol}
+Zaman dilimi: {timeframe}
+
+Piyasa verisi:
+{market_data}
+
+Öğrenilmiş strateji notları:
+{strategy_notes}
+
+Yukarıdaki bilgileri kullanarak eğitim amaçlı piyasa analizi yap.
+"""
 
     headers = {
-        "Authorization": f"Bearer {AI_API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {API_KEY}"
     }
 
-    data = {
-        "model": AI_MODEL,
+    payload = {
+        "model": MODEL,
         "messages": [
             {
                 "role": "system",
-                "content": (
-                    "Sen Yhlas AI Agent'sın. "
-                    "Türkçe cevap ver. "
-                    "Kısa, anlaşılır ve yardımcı ol."
-                )
+                "content": SYSTEM_PROMPT
             },
             {
                 "role": "user",
-                "content": message
+                "content": prompt
             }
         ],
-        "temperature": 0.7
+        "temperature": 0.2
     }
 
+    response = requests.post(
+        API_URL,
+        headers=headers,
+        json=payload,
+        timeout=60
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    return data["choices"][0]["message"]["content"]
+
+
+@app.route("/")
+def home():
+    return jsonify({
+        "status": "online",
+        "mode": "paper_analysis"
+    })
+
+
+@app.route("/analyze", methods=["POST"])
+def analysis():
+
+    data = request.get_json() or {}
+
+    symbol = data.get("symbol", "BTCUSDT")
+    timeframe = data.get("timeframe", "15m")
+    market_data = data.get("market_data", "")
+    strategy_notes = data.get("strategy_notes", "")
+
+    if not market_data:
+        return jsonify({
+            "error": "market_data gerekli"
+        }), 400
+
     try:
-        response = requests.post(
-            AI_API_URL,
-            headers=headers,
-            json=data,
-            timeout=60
+        result = analyze(
+            symbol,
+            timeframe,
+            market_data,
+            strategy_notes
         )
 
-        if response.status_code != 200:
-            return f"AI API hatası ({response.status_code}): {response.text[:500]}"
-
-        result = response.json()
-
-        return result["choices"][0]["message"]["content"]
-
-    except Exception as e:
-        return f"AI bağlantı hatası: {str(e)}"
-
-
-# =========================
-# TELEGRAM
-# =========================
-
-def send_telegram(chat_id, text):
-    if not TG_TOKEN:
-        print("TG_TOKEN ayarlanmamış.")
-        return False
-
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-
-    try:
-        response = requests.post(
-            url,
-            json={
-                "chat_id": chat_id,
-                "text": text
-            },
-            timeout=30
-        )
-
-        print("Telegram:", response.status_code, response.text[:300])
-
-        return response.ok
+        return jsonify({
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "analysis": result,
+            "mode": "simulation"
+        })
 
     except Exception as e:
-        print("Telegram gönderme hatası:", e)
-        return False
+        return jsonify({
+            "error": str(e)
+        }), 500
 
 
-# =========================
+if __name__ == "__main__":
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=False
+    )# =========================
 # ROUTES
 # =========================
 
